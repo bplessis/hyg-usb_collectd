@@ -4,6 +4,7 @@ LDFLAGS=-shared -lusb-1.0
 CC=gcc
 
 HYGMOD=hygusb.so
+DESTDIR?=
 
 .SUFFIXES: .o .c .so
 
@@ -14,6 +15,6 @@ clean:
 	@echo cleanup done
 
 install: $(HYGMOD)
-
+	@install $< $(DESTDIR)/usr/lib/collectd/
 .o.so: 
 	$(LD) $(LDFLAGS) -o $@ $<
