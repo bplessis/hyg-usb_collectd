@@ -1,0 +1,15 @@
+Source: hygusb-collectd
+Section: unknown
+Priority: optional
+Maintainer: benoit plessis <benoit@plessis.info>
+Build-Depends: debhelper (>= 9), collectd-dev, libusb-1.0-0-dev
+Standards-Version: 3.9.5
+Homepage: <insert the upstream URL, if relevant>
+#Vcs-Git: git://anonscm.debian.org/collab-maint/hygusb-collectd.git
+#Vcs-Browser: http://anonscm.debian.org/?p=collab-maint/hygusb-collectd.git;a=summary
+
+Package: hygusb-collectd
+Architecture: any
+Depends: collectd-core, ${shlibs:Depends}, ${misc:Depends}
+Description: <insert up to 60 chars description>
+ <insert long description, indented with spaces>
