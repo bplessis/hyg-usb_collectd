@@ -203,9 +203,20 @@ static int hygusb_read (void)
                 return r ;
             }
 
-            snprintf (plugin_instance, DATA_MAX_NAME_LEN,
-                      "%03d.%03d.0", devBus, devAddress ) ;
-
+ 
+            if (desc.iSerialNumber > 0) {
+                r = libusb_get_string_descriptor_ascii ( handle, desc.iSerialNumber, plugin_instance, DATA_MAX_NAME_LEN );
+                
+                if (r < 0) {
+                    snprintf (plugin_instance, DATA_MAX_NAME_LEN,
+                            "%03d.%03d.0", devBus, devAddress ) ;
+                } else {
+                    strncat (plugin_instance, ".0", DATA_MAX_NAME_LEN - r -1);
+                }
+            } else {
+                snprintf (plugin_instance, DATA_MAX_NAME_LEN,
+                        "%03d.%03d.0", devBus, devAddress ) ;
+            }
             r = hygusb_process_device ( handle, plugin_instance ) ;
 
             libusb_close ( handle ) ;
