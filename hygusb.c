@@ -35,6 +35,7 @@
 #endif /* DISABLE_ISOC99 */
 
 #include <time.h>
+#include <stdint.h>
 
 #endif /* ! HAVE_CONFIG */
 
@@ -44,6 +45,8 @@
 
 #include <libusb.h>
 
+#define FALSE 0
+#define TRUE !FALSE
 
 #define HYGUSB_VID      0x04D8
 #define HYGUSB_PID      0xF2C4
@@ -52,6 +55,58 @@ int selectBus = 0, selectAddress = 0 ;
 float humidityWarning = 0, humidityAlert = 0;
 float tempWarning = 0, tempAlert = 0;
 
+typedef union {
+    struct {
+        u_int8_t msb ;
+        u_int8_t lsb ;
+    } ;
+    u_int16_t value ;
+} __DWORD ;
+
+typedef struct __attribute__ ( ( packed ) ) {
+    u_int8_t stale[8] ;
+
+    __DWORD hyg ;
+    __DWORD temp ;
+
+    u_int8_t green_led ;
+    u_int8_t yellow_led ;
+    u_int8_t red_led ;
+    signed char parity ;
+
+    uint8_t v[24];
+} __INTERNAL_DEVSTATE ;
+
+int parity_check ( __INTERNAL_DEVSTATE __dev_state ) {
+    unsigned char *data ;
+
+    if ( __dev_state.parity == 0 ) {
+        /* Original firmware ? */
+        /* can only confirm known data are ok */
+
+        if ( __dev_state.green_led != 0
+             && __dev_state.green_led != 1
+             && __dev_state.green_led != 0xFF )
+            return FALSE ;
+
+        if ( __dev_state.yellow_led != 0
+             && __dev_state.yellow_led != 1
+             && __dev_state.yellow_led != 0xFF )
+            return FALSE ;
+
+        if ( __dev_state.red_led != 0
+             && __dev_state.red_led != 1
+             && __dev_state.red_led != 0xFF )
+            return FALSE ;
+
+        return TRUE ;
+    } else {
+        data = ( unsigned char * ) &__dev_state ;
+        return data[7] ==
+            ( data[0] ^ data[1] ^ data[2] ^ data[3] ^ data[4] ^
+              data[5] ^ data[6] ) ;
+    }
+}
 
 /* submit data to collectd  */
 static void hygusb_submit (const char* plugin_instance, const char* type, gauge_t value) {
@@ -79,7 +134,8 @@ static int hygusb_process_device ( libusb_device_handle * handle,
     int i, r ;
     int transferred ;
 
-    unsigned char data_in[8] ;
+    __INTERNAL_DEVSTATE __dev_state ;
+    unsigned char data_out[4] = { 'D', 'D', 'D', 'A' } ;
 
     int hyg_data ;
     int temp_data ;
@@ -87,31 +143,66 @@ static int hygusb_process_device ( libusb_device_handle * handle,
     float hyg ;
     float temp ;
 
-    // Read Data
-    r = libusb_interrupt_transfer ( handle, 0x81, data_in, 8, &transferred,
-                                    5000 ) ;
+    // Send Data (initialize IN transfert for some firmware Rev)
+    r = libusb_interrupt_transfer ( handle, 0x01, data_out, 4,
+                                    &transferred, 5000 ) ;
     if ( r != 0 ) {
-        ERROR ( "Could not read data from hyg-usb (%s). Exiting.\n",
+        ERROR ( "Could not send data to hyg-usb (%s). Exiting.\n",
                 libusb_error_name ( r ) ) ;
         return EXIT_FAILURE ;
     }
-    if ( transferred < 8 ) {
-        ERROR ( "Short read from hyg-usb. Exiting.\n" ) ;
+    if ( transferred < 4 ) {
+        ERROR ( "Short write to hyg-usb. Exiting.\n" ) ;
         return EXIT_FAILURE ;
     }
 
-    hyg_data = data_in[0] << 8 ;
-    hyg_data += data_in[1] ;
+    // Read Data
+    int count = 0 ;
+    int success ;
 
-    hyg = 125.0 * hyg_data / 65536.0 - 6.0 ;
+    do {
+        count++ ;
+        success = 1 ;
+
+        r = libusb_interrupt_transfer ( handle, 0x81,
+                                        ( unsigned char * )
+                                        &__dev_state,
+                                        sizeof ( __INTERNAL_DEVSTATE ),
+                                        &transferred, 5000 ) ;
+
+        if ( r != 0 ) {
+            ERROR ( "Could not read data from hyg-usb (%s). Retrying ...\n",
+                    libusb_error_name ( r ) ) ;
+            success = 0 ;
+        }
+
+        if ( transferred < 8 ) {
+            ERROR ( "Short read from hyg-usb. Retrying ...\n" ) ;
+            success = 0 ;
+        }
+
+        if ( !parity_check ( __dev_state ) ) {
+            ERROR ( "Parity Check Failed. Retrying ...\n" ) ;
+            success = 0 ;
+        }
+
+    } while ( !success && ( count < 3 ) ) ;
+
+
+    if ( !success ) {
+
+        ERROR ("Still failing after %d attempts. Exiting.\n",
+               count ) ;
+        return EXIT_FAILURE ;
+    }
+
+    // *** Display Hyg
+    hyg = 125.0 * ntohs ( __dev_state.hyg.value ) / 65536.0 - 6.0 ;
+
+    // *** Display Temp
+    temp = 175.72 * ntohs ( __dev_state.temp.value ) / 65536.0 - 46.85 ;
 
     hygusb_submit ( plugin_instance, "humidity", hyg ) ;
-
-    temp_data = data_in[2] << 8 ;
-    temp_data += data_in[3] ;
-
-    temp = 175.72 * temp_data / 65536.0 - 46.85 ;
-
     hygusb_submit ( plugin_instance, "temperature", temp ) ;
 
     return EXIT_SUCCESS ;
@@ -203,10 +294,10 @@ static int hygusb_read (void)
                 return r ;
             }
 
- 
+
             if (desc.iSerialNumber > 0) {
                 r = libusb_get_string_descriptor_ascii ( handle, desc.iSerialNumber, plugin_instance, DATA_MAX_NAME_LEN );
-                
+
                 if (r < 0) {
                     snprintf (plugin_instance, DATA_MAX_NAME_LEN,
                             "%03d.%03d.0", devBus, devAddress ) ;
