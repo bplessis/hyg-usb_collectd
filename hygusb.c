@@ -64,8 +64,6 @@ typedef union {
 } __DWORD ;
 
 typedef struct __attribute__ ( ( packed ) ) {
-    u_int8_t stale[8] ;
-
     __DWORD hyg ;
     __DWORD temp ;
 
@@ -74,7 +72,6 @@ typedef struct __attribute__ ( ( packed ) ) {
     u_int8_t red_led ;
     signed char parity ;
 
-    uint8_t v[24];
 } __INTERNAL_DEVSTATE ;
 
 int parity_check ( __INTERNAL_DEVSTATE __dev_state ) {
@@ -158,11 +155,10 @@ static int hygusb_process_device ( libusb_device_handle * handle,
 
     // Read Data
     int count = 0 ;
-    int success ;
+    int success = 0 ;
 
     do {
         count++ ;
-        success = 1 ;
 
         r = libusb_interrupt_transfer ( handle, 0x81,
                                         ( unsigned char * )
@@ -173,19 +169,20 @@ static int hygusb_process_device ( libusb_device_handle * handle,
         if ( r != 0 ) {
             ERROR ( "Could not read data from hyg-usb (%s). Retrying ...\n",
                     libusb_error_name ( r ) ) ;
-            success = 0 ;
+            continue ;
         }
 
         if ( transferred < 8 ) {
             ERROR ( "Short read from hyg-usb. Retrying ...\n" ) ;
-            success = 0 ;
+            continue ;
         }
 
         if ( !parity_check ( __dev_state ) ) {
             ERROR ( "Parity Check Failed. Retrying ...\n" ) ;
-            success = 0 ;
+            continue ;
         }
 
+        success = 1 ;
     } while ( !success && ( count < 3 ) ) ;
 
 
