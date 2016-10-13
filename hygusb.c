@@ -140,18 +140,6 @@ static int hygusb_process_device ( libusb_device_handle * handle,
     float hyg ;
     float temp ;
 
-    // Send Data (initialize IN transfert for some firmware Rev)
-    r = libusb_interrupt_transfer ( handle, 0x01, data_out, 4,
-                                    &transferred, 5000 ) ;
-    if ( r != 0 ) {
-        ERROR ( "Could not send data to hyg-usb (%s). Exiting.\n",
-                libusb_error_name ( r ) ) ;
-        return EXIT_FAILURE ;
-    }
-    if ( transferred < 4 ) {
-        ERROR ( "Short write to hyg-usb. Exiting.\n" ) ;
-        return EXIT_FAILURE ;
-    }
 
     // Read Data
     int count = 0 ;
@@ -159,6 +147,19 @@ static int hygusb_process_device ( libusb_device_handle * handle,
 
     do {
         count++ ;
+
+        // Send Data (initialize IN transfert for some firmware Rev)
+        r = libusb_interrupt_transfer ( handle, 0x01, data_out, 4,
+                                        &transferred, 5000 ) ;
+        if ( r != 0 ) {
+            ERROR ( "Could not send data to hyg-usb (%s). Exiting.\n",
+                    libusb_error_name ( r ) ) ;
+            continue ;
+        }
+        if ( transferred < 4 ) {
+            ERROR ( "Short write to hyg-usb. Exiting.\n" ) ;
+            continue ;
+        }
 
         r = libusb_interrupt_transfer ( handle, 0x81,
                                         ( unsigned char * )
@@ -279,16 +280,16 @@ static int hygusb_read (void)
 
             r = libusb_open ( dev, &handle ) ;
             if ( r != 0 ) {
-                ERROR ( "Could not open device (%s), exiting\n",
+                ERROR ( "Could not open device (%s), skipping\n",
                         libusb_error_name ( r ) ) ;
-                return r ;
+                continue ;
             }
 
             r = libusb_claim_interface ( handle, 0 ) ;
             if ( r != 0 ) {
-                ERROR ( "Could not claim usb interface (%s). Exiting\n",
+                ERROR ( "Could not claim usb interface (%s). skipping\n",
                         libusb_error_name ( r ) ) ;
-                return r ;
+                continue ;
             }
 
 
@@ -305,6 +306,7 @@ static int hygusb_read (void)
                 snprintf (plugin_instance, DATA_MAX_NAME_LEN,
                         "%03d.%03d.0", devBus, devAddress ) ;
             }
+
             r = hygusb_process_device ( handle, plugin_instance ) ;
 
             libusb_close ( handle ) ;
